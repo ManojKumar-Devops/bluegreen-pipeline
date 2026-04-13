@@ -30,9 +30,7 @@ phases:
       - docker push $REPO_URI:latest
       - echo Writing imageDetail.json...
       - printf '{"ImageURI":"%s"}' $REPO_URI:$IMAGE_TAG > imageDetail.json
-      - echo Updating taskdef.json with new image URI...
-      - python3 -c "import json; f=open('taskdef.json'); d=json.load(f); f.close(); d['containerDefinitions'][0]['image']='$REPO_URI:$IMAGE_TAG'; f=open('taskdef.json','w'); json.dump(d,f,indent=2); f.close()"
-      - cat taskdef.json
+      - echo Done. Artifacts ready for CodeDeploy.
 
 artifacts:
   files:
