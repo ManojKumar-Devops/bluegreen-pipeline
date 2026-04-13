@@ -10,7 +10,7 @@
   "containerDefinitions": [
     {
       "name": "bluegreen-app",
-      "image": "544949538590.dkr.ecr.ap-south-1.amazonaws.com/bluegreen-app:latest",
+      "image": "<IMAGE_URI>",
       "portMappings": [
         {
           "containerPort": 5000,
