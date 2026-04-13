@@ -27,7 +27,21 @@ class PipelineStack(Stack):
                 iam.ManagedPolicy.from_aws_managed_policy_name(
                     "AmazonEC2ContainerRegistryPowerUser"
                 )
-            ]
+            ],
+            inline_policies={
+                "EcrPublicPolicy": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            effect=iam.Effect.ALLOW,
+                            actions=[
+                                "ecr-public:GetAuthorizationToken",
+                                "sts:GetServiceBearerToken"
+                            ],
+                            resources=["*"]
+                        )
+                    ]
+                )
+            }
         )
 
         # CodeBuild project
