@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
-import os
-
 import aws_cdk as cdk
-
-from bluegreen_pipeline.bluegreen_pipeline_stack import BluegreenPipelineStack
-
+from bluegreen_pipeline.vpc_stack      import VpcStack
+from bluegreen_pipeline.ecr_stack      import EcrStack
+from bluegreen_pipeline.ecs_stack      import EcsStack
+from bluegreen_pipeline.pipeline_stack import PipelineStack
 
 app = cdk.App()
-BluegreenPipelineStack(app, "BluegreenPipelineStack",
-    # If you don't specify 'env', this stack will be environment-agnostic.
-    # Account/Region-dependent features and context lookups will not work,
-    # but a single synthesized template can be deployed anywhere.
 
-    # Uncomment the next line to specialize this stack for the AWS Account
-    # and Region that are implied by the current CLI configuration.
+env = cdk.Environment(
+    account="544949538590",    # ← your real AWS account ID
+    region="ap-south-1"        # ← Mumbai region
+)
 
-    #env=cdk.Environment(account=os.getenv('CDK_DEFAULT_ACCOUNT'), region=os.getenv('CDK_DEFAULT_REGION')),
-
-    # Uncomment the next line if you know exactly what Account and Region you
-    # want to deploy the stack to. */
-
-    #env=cdk.Environment(account='123456789012', region='us-east-1'),
-
-    # For more information, see https://docs.aws.amazon.com/cdk/latest/guide/environments.html
-    )
+vpc_stack = VpcStack(app, "VpcStack", env=env)
+ecr_stack = EcrStack(app, "EcrStack", env=env)
+ecs_stack = EcsStack(app, "EcsStack",
+                     vpc=vpc_stack.vpc,
+                     repository=ecr_stack.repository,
+                     env=env)
+PipelineStack(app, "PipelineStack",
+              ecr_repo=ecr_stack.repository,
+              ecs_service=ecs_stack.service,
+              ecs_cluster=ecs_stack.cluster,
+              blue_tg=ecs_stack.blue_tg,
+              green_tg=ecs_stack.green_tg,
+              listener=ecs_stack.listener,
+              env=env)
 
 app.synth()
