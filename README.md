@@ -1,409 +1,168 @@
-# 🚀 AWS CDK Blue/Green Deployment Pipeline
+# AWS CDK Blue/Green Deployment Pipeline
 
-A production-ready **Blue/Green deployment pipeline** on AWS ECS Fargate using AWS CDK (Python), CodePipeline, CodeBuild, and CodeDeploy — with zero-downtime deployments on every `git push`.
-
----
-
-## 📐 Architecture
-
-```
-GitHub → CodePipeline → CodeBuild → ECR → CodeDeploy (Blue/Green) → ECS Fargate → ALB
-```
-
-| Component | AWS Service | Purpose |
-|-----------|-------------|---------|
-| Source | CodePipeline + GitHub | Triggers on every push to `main` |
-| Build | CodeBuild | Builds Docker image, pushes to ECR |
-| Registry | ECR | Stores Docker images |
-| Deploy | CodeDeploy | Blue/Green traffic swap |
-| Compute | ECS Fargate | Runs containerized Flask app |
-| Load Balancer | ALB | Routes production (port 80) and test (port 8080) traffic |
-| Networking | VPC | Public + private subnets across 2 AZs |
-
-### Blue/Green Flow
-
-```
-Current live traffic → Blue tasks (port 80)
-New deployment      → Green tasks start (port 8080 test listener)
-Health check passes → ALB shifts 100% traffic to Green
-Old Blue tasks      → Terminated (zero downtime)
-```
+A production-grade CI/CD pipeline built on AWS that delivers **zero-downtime deployments** using a Blue/Green strategy. Every code push to GitHub automatically builds, tests, and deploys a containerized application to Amazon ECS Fargate — with instant rollback capability and no service interruption.
 
 ---
 
-## 📁 Project Structure
+## Overview
 
-```
-bluegreen-pipeline/
-├── app.py                          # CDK entry point — wires all stacks
-├── requirements.txt                # CDK Python dependencies
-├── cdk.json                        # CDK configuration
-├── cdk.context.json                # CDK context cache
-├── buildspec.yml                   # CodeBuild — Docker build + push instructions
-├── appspec.yml                     # CodeDeploy — Blue/Green swap config
-├── taskdef.json                    # ECS task definition template
-│
-├── bluegreen_pipeline/
-│   ├── __init__.py
-│   ├── vpc_stack.py                # VPC, subnets, NAT gateway
-│   ├── ecr_stack.py                # ECR private repository
-│   ├── ecs_stack.py                # ECS cluster, ALB, Blue/Green target groups, Fargate service
-│   └── pipeline_stack.py          # CodePipeline + CodeBuild + CodeDeploy
-│
-└── app/
-    ├── app.py                      # Flask application
-    ├── requirements.txt            # Flask + Gunicorn
-    └── Dockerfile                  # Container image definition
-```
+This project demonstrates a fully automated deployment pipeline where infrastructure is defined as code using AWS CDK (Python). The pipeline handles everything from source code changes to live traffic shifting — without any manual intervention.
+
+The application runs as a containerized Flask service on Amazon ECS Fargate, fronted by an Application Load Balancer that manages traffic between Blue (current) and Green (new) environments during every deployment.
 
 ---
 
-## ✅ Prerequisites
+## Architecture
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Python | 3.9+ | https://python.org |
-| Node.js | 22.x or 24.x | https://nodejs.org |
-| AWS CDK | 2.x | `npm install -g aws-cdk` |
-| AWS CLI | 2.x | https://aws.amazon.com/cli |
-| Docker Desktop | 28.x+ | https://docs.docker.com/get-docker |
-| Git | any | https://git-scm.com |
+```
+GitHub → CodePipeline → CodeBuild → ECR → CodeDeploy → ECS Fargate → ALB → Users
+```
+
+When a developer pushes code to the `main` branch, CodePipeline detects the change and orchestrates the full deployment flow. CodeBuild compiles the Docker image and stores it in ECR. CodeDeploy then launches a new Green environment alongside the existing Blue environment, validates it through health checks, and atomically shifts all traffic to Green — retiring the old Blue environment only after the new one is confirmed healthy.
 
 ---
 
-## 🛠️ Setup & Deployment
+## How Blue/Green Deployment Works
 
-### Step 1 — Clone and configure
+The ALB maintains two listeners — production traffic on port 80 and test traffic on port 8080. During a deployment:
 
-```bash
-git clone https://github.com/ManojKumar-Devops/bluegreen-pipeline.git
-cd bluegreen-pipeline
-```
+1. New Green tasks start and register with the test listener on port 8080
+2. CodeDeploy runs health checks against the Green environment
+3. Once all health checks pass, the ALB shifts 100% of production traffic to Green
+4. The old Blue tasks are gracefully terminated
 
-Create and activate Python virtual environment:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate        # Mac/Linux
-# .venv\Scripts\activate         # Windows
-```
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-### Step 2 — Configure AWS CLI
-
-Create an IAM user with `AdministratorAccess` in AWS Console, generate access keys, then:
-
-```bash
-aws configure
-# AWS Access Key ID:     AKIA...
-# AWS Secret Access Key: xxxxxx
-# Default region:        ap-south-1
-# Output format:         json
-```
-
-Verify you are using an IAM user (not root):
-
-```bash
-aws sts get-caller-identity
-# "Arn" must show :user/... NOT :root
-```
-
-### Step 3 — Bootstrap CDK
-
-Run once per AWS account/region:
-
-```bash
-cdk bootstrap aws://YOUR_ACCOUNT_ID/ap-south-1
-```
-
-### Step 4 — Create GitHub repository
-
-1. Go to `github.com/new`
-2. Name it `bluegreen-pipeline`
-3. Do NOT initialize with README or .gitignore
-4. Generate a **Classic Personal Access Token** with `repo` and `admin:repo_hook` scopes at `github.com/settings/tokens`
-
-Store the token in AWS Secrets Manager:
-
-```bash
-aws secretsmanager create-secret \
-  --name github-token \
-  --secret-string "ghp_YOUR_TOKEN_HERE" \
-  --region ap-south-1
-```
-
-Add remote and push:
-
-```bash
-git remote add origin https://github.com/ManojKumar-Devops/bluegreen-pipeline.git
-git branch -M main
-git push -u origin main
-```
-
-### Step 5 — Build and push initial Docker image
-
-**Important:** The Docker image must exist in ECR before deploying EcsStack. Build for `linux/amd64` (required for ECS Fargate, especially on Apple Silicon Macs):
-
-```bash
-# ECR login
-aws ecr get-login-password --region ap-south-1 | \
-  docker login --username AWS --password-stdin \
-  YOUR_ACCOUNT_ID.dkr.ecr.ap-south-1.amazonaws.com
-
-# Build and push (hardcoded URI — no variables to avoid zsh issues)
-docker buildx build \
-  --platform linux/amd64 \
-  --provenance=false \
-  --push \
-  -t YOUR_ACCOUNT_ID.dkr.ecr.ap-south-1.amazonaws.com/bluegreen-app:latest \
-  ./app
-
-# Verify image is in ECR
-aws ecr describe-images \
-  --repository-name bluegreen-app \
-  --region ap-south-1 \
-  --query 'imageDetails[0].{tags:imageTags,pushedAt:imagePushedAt}'
-```
-
-> **Apple Silicon Mac note:** Always use `--platform linux/amd64 --provenance=false` when building for ECS Fargate. Without these flags, Docker builds an `arm64` image that ECS cannot run.
-
-### Step 6 — Deploy CDK stacks in order
-
-```bash
-# 1. Deploy VPC
-cdk deploy VpcStack --require-approval never
-
-# 2. Deploy ECR repository
-cdk deploy EcrStack --require-approval never
-
-# 3. Push Docker image (see Step 5 above)
-
-# 4. Deploy ECS cluster + ALB + Blue/Green service
-cdk deploy EcsStack --require-approval never
-
-# 5. Copy ExecRoleArn from EcsStack outputs — update taskdef.json
-# Outputs will print:
-#   EcsStack.ALBDnsName  = bluegreen-alb-xxx.ap-south-1.elb.amazonaws.com
-#   EcsStack.ExecRoleArn = arn:aws:iam::ACCOUNT:role/EcsStack-TaskExecRole...
-
-# 6. Update taskdef.json with real role ARN
-python3 -c "
-import json
-with open('taskdef.json') as f: d = json.load(f)
-d['executionRoleArn'] = 'arn:aws:iam::YOUR_ACCOUNT_ID:role/EcsStack-TaskExecRole...'
-d['containerDefinitions'][0]['image'] = '<IMAGE_URI>'
-with open('taskdef.json', 'w') as f: json.dump(d, f, indent=2)
-print('updated')
-"
-
-# 7. Commit and push taskdef.json
-git add taskdef.json
-git commit -m "fix: updated executionRoleArn"
-git push origin main
-
-# 8. Deploy CodePipeline + CodeBuild + CodeDeploy
-cdk deploy PipelineStack --require-approval never
-```
-
-> **Deployment order is mandatory:**
-> `VpcStack` → `EcrStack` → *(push image)* → `EcsStack` → `PipelineStack`
+If health checks fail at any point, CodeDeploy automatically rolls back to the Blue environment. Users experience zero downtime throughout the entire process.
 
 ---
 
-## 🔄 How the CI/CD Pipeline Works
+## Infrastructure Components
 
-After all stacks are deployed, every `git push` to `main` automatically:
-
-1. **Source stage** — CodePipeline detects the GitHub push via webhook
-2. **Build stage** — CodeBuild builds a new Docker image tagged with the commit SHA and pushes it to ECR
-3. **Deploy stage** — CodeDeploy starts a Blue/Green deployment:
-   - Launches new Green tasks with the updated image
-   - Routes test traffic to Green via port 8080
-   - Runs health checks on `/health` endpoint
-   - Shifts 100% production traffic from Blue to Green
-   - Terminates old Blue tasks
-
-### Test the pipeline end-to-end
-
-```bash
-# Make a change
-sed -i '' 's/1.0.0/2.0.0/' app/app.py
-
-# Push to trigger pipeline
-git add app/app.py
-git commit -m "feat: bump to version 2.0.0"
-git push origin main
-```
-
-Watch pipeline status:
-
-```bash
-aws codepipeline get-pipeline-state \
-  --name bluegreen-pipeline \
-  --region ap-south-1 \
-  --query 'stageStates[*].{stage:stageName,status:latestExecution.status}'
-```
-
-Test live app after deployment:
-
-```bash
-curl http://YOUR_ALB_DNS/health
-# {"status": "healthy"}
-
-curl http://YOUR_ALB_DNS/
-# {"message": "Blue/Green Deployment Demo", "version": "2.0.0", ...}
-```
+| Layer | Service | Role |
+|-------|---------|------|
+| Networking | Amazon VPC | Isolated network with public and private subnets across 2 availability zones |
+| Registry | Amazon ECR | Private Docker image repository with lifecycle policies |
+| Compute | ECS Fargate | Serverless container execution — no EC2 instances to manage |
+| Load Balancing | Application Load Balancer | Routes production and test traffic, manages Blue/Green cutover |
+| Source Control | GitHub | Triggers pipeline on every push to main branch |
+| Build | AWS CodeBuild | Compiles Docker image, runs build steps, pushes to ECR |
+| Deployment | AWS CodeDeploy | Orchestrates Blue/Green traffic shifting and rollback |
+| Pipeline | AWS CodePipeline | Coordinates the end-to-end Source → Build → Deploy flow |
+| IaC | AWS CDK (Python) | All infrastructure defined and deployed as Python code |
 
 ---
 
-## 🧪 Testing
+## CDK Stack Breakdown
 
-### Health check endpoint
-```bash
-curl http://YOUR_ALB_DNS/health
-# Expected: {"status": "healthy"}
-```
+The infrastructure is split into four independent CDK stacks, each with a single responsibility.
 
-### Main endpoint
-```bash
-curl http://YOUR_ALB_DNS/
-# Expected: {"message": "Blue/Green Deployment Demo", "version": "1.0.0", "host": "...", "env": "production"}
-```
+**VpcStack** provisions the network foundation — a VPC with public subnets for the load balancer and private subnets for the application containers, with a NAT Gateway for outbound internet access.
 
-### Test listener (Green environment before cutover)
-```bash
-curl http://YOUR_ALB_DNS:8080/health
-# Checks Green tasks before traffic is shifted
-```
+**EcrStack** creates the private container registry where Docker images are stored and versioned. A lifecycle policy retains only the last 10 images to manage storage costs.
+
+**EcsStack** is the core of the deployment — it provisions the ECS cluster, defines the Fargate task, creates the Application Load Balancer with two target groups (Blue and Green), and configures the ECS service with a CodeDeploy deployment controller.
+
+**PipelineStack** wires the CI/CD pipeline together — CodePipeline monitors GitHub for changes, CodeBuild handles the Docker build and ECR push, and a CodeDeploy deployment group handles the Blue/Green traffic management.
 
 ---
 
-## ⚙️ Configuration
+## Application
 
-### Environment variables
+The deployed application is a Python Flask REST API running under Gunicorn, containerised using a minimal Alpine Linux base image. It exposes two endpoints:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `APP_ENV` | `production` | Application environment |
-| `APP_VERSION` | `1.0.0` | Application version |
+- **/** returns deployment metadata including version, hostname, and environment
+- **/health** returns a health status used by the ALB and CodeDeploy for readiness checks
 
-### CDK stack configuration (`app.py`)
-
-```python
-env = cdk.Environment(
-    account="YOUR_ACCOUNT_ID",
-    region="ap-south-1"        # Mumbai — change if needed
-)
-```
-
-### Deployment config options (`pipeline_stack.py`)
-
-```python
-# Change deployment strategy:
-deployment_config=cd.EcsDeploymentConfig.ALL_AT_ONCE          # instant cutover
-deployment_config=cd.EcsDeploymentConfig.CANARY_10_PERCENT_5_MINUTES  # gradual
-deployment_config=cd.EcsDeploymentConfig.LINEAR_10_PERCENT_EVERY_1_MINUTES  # linear
-```
+The container image is built targeting `linux/amd64` to ensure compatibility with ECS Fargate's Intel-based infrastructure.
 
 ---
 
-## 🐛 Common Issues & Fixes
+## Prerequisites
 
-### CannotPullContainerError — platform mismatch
-**Cause:** Built `arm64` image on Apple Silicon Mac, ECS needs `linux/amd64`
-
-**Fix:**
-```bash
-docker buildx build --platform linux/amd64 --provenance=false --push \
-  -t YOUR_ACCOUNT_ID.dkr.ecr.ap-south-1.amazonaws.com/bluegreen-app:latest ./app
-```
-
-### ECS tasks failing on fresh EcsStack deploy
-**Cause:** ECR repository is empty when ECS tries to pull the image
-
-**Fix:** Always push Docker image to ECR before deploying EcsStack
-
-### CDK bootstrap error — cannot assume role
-**Cause:** Using AWS root account credentials
-
-**Fix:** Create an IAM user with `AdministratorAccess`, generate access keys, run `aws configure` with IAM user keys (not root keys)
-
-### CodePipeline webhook 404
-**Cause:** Wrong GitHub owner name or missing `admin:repo_hook` token scope
-
-**Fix:** Verify exact GitHub username with `curl -H "Authorization: token TOKEN" https://api.github.com/user` and regenerate Classic token with `repo` + `admin:repo_hook` scopes
-
-### taskdef.json executionRoleArn stale after redeploy
-**Cause:** EcsStack creates a new IAM role with a new ARN on every fresh deploy
-
-**Fix:** Always update `taskdef.json` after redeploying EcsStack:
-```bash
-ROLE_ARN=$(aws cloudformation describe-stacks --stack-name EcsStack \
-  --region ap-south-1 \
-  --query "Stacks[0].Outputs[?OutputKey=='ExecRoleArn'].OutputValue" \
-  --output text)
-```
+- AWS account with an IAM user (AdministratorAccess)
+- AWS CLI configured with IAM credentials
+- Node.js 22.x or 24.x
+- Python 3.9+
+- AWS CDK v2
+- Docker Desktop
+- GitHub account with a Classic Personal Access Token (repo + admin:repo_hook scopes)
 
 ---
 
-## 💰 Cost Estimate
+## Deployment Order
 
-| Resource | Approx cost |
-|----------|-------------|
-| ALB | ~$0.008/hour (~₹20/day) |
-| NAT Gateway | ~$0.045/hour (~₹90/day) |
-| ECS Fargate (2 tasks, 0.25 vCPU, 512MB) | ~$0.01/hour (~₹20/day) |
-| ECR storage | ~$0.10/GB/month |
-| CodeBuild | First 100 min/month free |
+The stacks have hard dependencies and must be deployed in this exact sequence:
 
-> **Always run `cdk destroy --all` after practice to avoid charges.**
+**VpcStack → EcrStack → Push Docker image → EcsStack → PipelineStack**
+
+The Docker image must exist in ECR before EcsStack deploys because ECS attempts to start tasks immediately upon service creation. Deploying EcsStack before pushing an image causes all tasks to fail at the image pull step.
+
+After EcsStack deploys, the IAM execution role ARN printed in the stack outputs must be updated in `taskdef.json` before deploying PipelineStack. This role ARN is unique per deployment and cannot be predicted in advance.
 
 ---
 
-## 🗑️ Cleanup
+## CI/CD Flow
 
-```bash
-# Delete ECR images first
-aws ecr batch-delete-image \
-  --repository-name bluegreen-app \
-  --region ap-south-1 \
-  --image-ids imageTag=latest
+Once all stacks are deployed, the pipeline is fully automated. A developer only needs to push code — the rest happens automatically.
 
-# Destroy all stacks
-cdk destroy --all --force
-```
+The typical end-to-end time from `git push` to traffic shifted to the new version is approximately 4 to 6 minutes, broken down as:
+
+- Source detection and pipeline trigger — under 30 seconds
+- Docker image build and ECR push — 2 to 3 minutes
+- Green task launch and health checks — 1 to 2 minutes
+- Traffic cutover — under 10 seconds
 
 ---
 
-## 📚 Tech Stack
+## Key Design Decisions
 
-- **Infrastructure:** AWS CDK v2 (Python)
-- **CI/CD:** AWS CodePipeline, CodeBuild, CodeDeploy
-- **Container Registry:** Amazon ECR
-- **Compute:** Amazon ECS Fargate
-- **Load Balancer:** Application Load Balancer
-- **Networking:** Amazon VPC
-- **Application:** Python Flask + Gunicorn
-- **Container:** Docker (linux/amd64)
+**Fargate over EC2** — Fargate removes the operational overhead of managing EC2 instances, patching, and capacity planning. The trade-off is slightly higher per-unit cost, which is acceptable for this workload size.
 
----
+**CodeDeploy ALL_AT_ONCE** — The deployment config performs an immediate full cutover rather than a gradual canary or linear shift. This is appropriate for development and staging workloads. A production environment would benefit from `CANARY_10_PERCENT_5_MINUTES` to detect regressions before full cutover.
 
-## 🎓 Lessons Learned
+**Separate CDK stacks** — Splitting infrastructure into four stacks allows independent updates. Changing the pipeline configuration does not require redeploying the VPC or ECS service, which reduces deployment risk and time.
 
-1. **Platform matters** — Always build Docker images with `--platform linux/amd64` on Apple Silicon Macs. ECS Fargate runs on Intel/AMD hardware.
-2. **Deploy order is critical** — ECR image must exist before EcsStack creates the ECS service. `VpcStack → EcrStack → docker push → EcsStack → PipelineStack`.
-3. **IAM role ARN changes on redeploy** — `taskdef.json` must be updated every time EcsStack is redeployed.
-4. **Classic GitHub token required** — CodePipeline webhooks require Classic PAT with `admin:repo_hook` scope. Fine-grained tokens do not work.
-5. **No shell variables with comments in zsh** — Inline `#` comments after variable assignments in zsh corrupt the variable value. Always run commands one line at a time.
-6. **CODE_DEPLOY controller is exclusive** — ECS services with `CODE_DEPLOY` controller cannot be force-restarted via `aws ecs update-service`. Use `aws deploy create-deployment` instead.
+**Private subnets for ECS tasks** — Application containers run in private subnets with no direct internet exposure. All inbound traffic flows through the ALB in the public subnet, and outbound traffic routes through the NAT Gateway.
 
 ---
 
-## 👨‍💻 Author
+## Cost Estimate
 
-**Manojkumar** — [@ManojKumar-Devops](https://github.com/ManojKumar-Devops)
+Running this infrastructure continuously costs approximately:
+
+| Resource | Daily Cost (approx) |
+|----------|-------------------|
+| Application Load Balancer | ₹16 |
+| NAT Gateway | ₹90 |
+| ECS Fargate (2 tasks) | ₹20 |
+| ECR storage | Negligible |
+| CodeBuild (first 100 min/month free) | ₹0 |
+
+**Recommended:** Destroy the stack after practice sessions to avoid ongoing charges. All infrastructure can be recreated in under 15 minutes from code.
+
+---
+
+## Lessons Learned
+
+Working through this project surfaced several non-obvious AWS and tooling behaviours worth documenting.
+
+**Apple Silicon compatibility** — Docker builds on M-series Macs default to `arm64`. ECS Fargate runs on Intel hardware and requires `linux/amd64`. The `--provenance=false` flag is additionally required when pushing to ECR with Docker buildx, as ECR cannot resolve the OCI index manifest that buildx produces by default.
+
+**CDK stack dependency ordering** — CDK passes live AWS resource objects between stacks at synthesis time. PipelineStack receives the ECS service, target groups, and ALB listener as constructor arguments from EcsStack. If EcsStack has not been deployed, those ARNs do not exist and the deployment fails immediately.
+
+**IAM role ARN drift** — CDK generates unique suffixes for IAM role names on every fresh stack deployment. The `taskdef.json` file references this ARN directly, so it must be updated after any EcsStack redeploy. Automating this update in the build process prevents future drift.
+
+**CODE_DEPLOY controller exclusivity** — ECS services configured with a CodeDeploy deployment controller cannot be restarted using the standard ECS force-new-deployment command. All deployments must go through CodeDeploy, which owns the deployment lifecycle for Blue/Green services.
+
+**Classic PAT requirement** — AWS CodePipeline's GitHub webhook integration requires a Classic Personal Access Token with `admin:repo_hook` scope. Fine-grained tokens do not support the webhook registration API that CodePipeline uses.
+
+---
+
+## Tech Stack
+
+AWS CDK (Python) · Amazon ECS Fargate · Amazon ECR · AWS CodePipeline · AWS CodeBuild · AWS CodeDeploy · Application Load Balancer · Amazon VPC · Python Flask · Gunicorn · Docker · GitHub
+
+---
+
+## Author
+
+**Manojkumar** · [github.com/ManojKumar-Devops](https://github.com/ManojKumar-Devops)
