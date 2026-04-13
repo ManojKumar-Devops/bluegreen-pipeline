@@ -71,14 +71,15 @@ class PipelineStack(Stack):
                         project=build_project,
                         input=src_out,
                         outputs=[bld_out])]),
-                cp.StageProps(stage_name="Deploy", actions=[
-                    cpa.CodeDeployEcsDeployAction(
-                        action_name="BlueGreen_Deploy",
-                        deployment_group=deploy_group,
-                        task_definition_template_input=bld_out,
-                        app_spec_template_input=bld_out,
-                        container_image_inputs=[
-                            cpa.CodeDeployEcsContainerImageInput(
-                                input=bld_out,
-                                task_definition_placeholder="IMAGE_URI")])])
-            ])
+                cpa.CodeDeployEcsDeployAction(
+                    action_name="BlueGreen_Deploy",
+                    deployment_group=deploy_group,
+                    task_definition_template_input=build_output,
+                    app_spec_template_input=build_output,
+                    container_image_inputs=[
+                        cpa.CodeDeployEcsContainerImageInput(
+                            input=build_output,
+                            task_definition_placeholder="IMAGE_URI"
+                        )
+                    ]
+                )
