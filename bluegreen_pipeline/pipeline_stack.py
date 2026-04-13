@@ -20,7 +20,6 @@ class PipelineStack(Stack):
                  listener: elbv2.ApplicationListener, **kwargs):
         super().__init__(scope, id, **kwargs)
 
-        # CodeBuild role
         build_role = iam.Role(self, "BuildRole",
             assumed_by=iam.ServicePrincipal("codebuild.amazonaws.com"),
             managed_policies=[
@@ -44,7 +43,6 @@ class PipelineStack(Stack):
             }
         )
 
-        # CodeBuild project
         build_project = cb.PipelineProject(self, "BuildProject",
             project_name="bluegreen-build",
             role=build_role,
@@ -64,14 +62,12 @@ class PipelineStack(Stack):
         )
         ecr_repo.grant_pull_push(build_project)
 
-        # CodeDeploy ECS application
-        app = cd.EcsApplication(self, "CdApp",
+        codedeploy_app = cd.EcsApplication(self, "CdApp",
             application_name="bluegreen-codedeploy-app"
         )
 
-        # CodeDeploy deployment group
         deploy_group = cd.EcsDeploymentGroup(self, "DeployGroup",
-            application=app,
+            application=codedeploy_app,
             deployment_group_name="bluegreen-deployment-group",
             service=ecs_service,
             blue_green_deployment_config=cd.EcsBlueGreenDeploymentConfig(
@@ -82,11 +78,9 @@ class PipelineStack(Stack):
             deployment_config=cd.EcsDeploymentConfig.ALL_AT_ONCE
         )
 
-        # Pipeline artifacts
         src_out = cp.Artifact("SourceOutput")
         bld_out = cp.Artifact("BuildOutput")
 
-        # CodePipeline
         cp.Pipeline(self, "Pipeline",
             pipeline_name="bluegreen-pipeline",
             cross_account_keys=False,
@@ -99,7 +93,9 @@ class PipelineStack(Stack):
                             owner="ManojKumar-Devops",
                             repo="bluegreen-pipeline",
                             branch="main",
-                            oauth_token=SecretValue.secrets_manager("github-token"),
+                            oauth_token=SecretValue.secrets_manager(
+                                "github-token"
+                            ),
                             output=src_out
                         )
                     ]
@@ -121,8 +117,12 @@ class PipelineStack(Stack):
                         cpa.CodeDeployEcsDeployAction(
                             action_name="BlueGreen_Deploy",
                             deployment_group=deploy_group,
-                            task_definition_template_input=bld_out,
-                            app_spec_template_input=bld_out,
+                            task_definition_template_file=bld_out.at_path(
+                                "taskdef.json"
+                            ),
+                            app_spec_template_file=bld_out.at_path(
+                                "appspec.yml"
+                            ),
                             container_image_inputs=[
                                 cpa.CodeDeployEcsContainerImageInput(
                                     input=bld_out,
