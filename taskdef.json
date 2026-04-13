@@ -1,0 +1,37 @@
+{
+  "family": "bluegreen-taskdef",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::544949538590:role/EcsStack-TaskExecRoleA2BBB60C-roatWskRI3K6",
+  "containerDefinitions": [
+    {
+      "name": "bluegreen-app",
+      "image": "544949538590.dkr.ecr.ap-south-1.amazonaws.com/bluegreen-app:latest",
+      "portMappings": [
+        {
+          "containerPort": 5000,
+          "protocol": "tcp"
+        }
+      ],
+      "essential": true,
+      "environment": [
+        {
+          "name": "APP_ENV",
+          "value": "production"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/bluegreen-app",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}
