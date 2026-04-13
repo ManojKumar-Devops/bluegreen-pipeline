@@ -1,0 +1,10 @@
+version: 0.0
+Resources:
+  - TargetService:
+      Type: AWS::ECS::Service
+      Properties:
+        TaskDefinition: 
+        LoadBalancerInfo:
+          ContainerName: "bluegreen-app"
+          ContainerPort: 5000
+        PlatformVersion: "LATEST"
