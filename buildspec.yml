@@ -10,9 +10,7 @@ phases:
   pre_build:
     commands:
       - echo Logging in to Amazon ECR...
-      - aws ecr get-login-password --region $AWS_DEFAULT_REGION |
-          docker login --username AWS --password-stdin
-          $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
       - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-8)
       - REPO_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
 
@@ -26,10 +24,14 @@ phases:
 
   post_build:
     commands:
+      - echo Pushing image to ECR...
       - docker push $REPO_URI:$IMAGE_TAG
       - docker push $REPO_URI:latest
+      - echo Writing imageDetail.json...
       - printf '{"ImageURI":"%s"}' $REPO_URI:$IMAGE_TAG > imageDetail.json
-      - sed -i "s||$REPO_URI:$IMAGE_TAG|g" taskdef.json
+      - echo Updating taskdef.json with new image URI...
+      - python3 -c "import json; f=open('taskdef.json'); d=json.load(f); f.close(); d['containerDefinitions'][0]['image']='$REPO_URI:$IMAGE_TAG'; f=open('taskdef.json','w'); json.dump(d,f,indent=2); f.close()"
+      - cat taskdef.json
 
 artifacts:
   files:
