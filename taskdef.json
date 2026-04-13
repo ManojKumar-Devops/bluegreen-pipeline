@@ -6,7 +6,7 @@
   ],
   "cpu": "256",
   "memory": "512",
-  "executionRoleArn": "arn:aws:iam::544949538590:role/EcsStack-TaskExecRoleA2BBB60C-roatWskRI3K6",
+  "executionRoleArn": "arn:aws:iam::544949538590:role/EcsStack-TaskExecRoleA2BBB60C-eyAiJTyNtHmp",
   "containerDefinitions": [
     {
       "name": "bluegreen-app",
