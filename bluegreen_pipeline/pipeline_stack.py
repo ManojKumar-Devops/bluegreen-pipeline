@@ -60,7 +60,7 @@ class PipelineStack(Stack):
                 cp.StageProps(stage_name="Source", actions=[
                     cpa.GitHubSourceAction(
                         action_name="GitHub_Source",
-                        owner="Manojkumar-Devops",
+                        owner="ManojKumar-Devops",
                         repo="bluegreen-pipeline",
                         branch="main",
                         oauth_token=SecretValue.secrets_manager("github-token"),
