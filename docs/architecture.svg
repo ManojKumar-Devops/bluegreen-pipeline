@@ -259,7 +259,7 @@
 
   <rect x="24" y="800" width="632" height="44" rx="10" fill="#f5f4f0" stroke="#d3d1c7" stroke-width="0.5"/>
   <text class="svc-label" x="340" y="819" style="fill:#6b6a63">AWS CDK (Python)  ·  ECS Fargate  ·  ECR  ·  CodePipeline  ·  CodeBuild  ·  CodeDeploy  ·  ALB  ·  VPC  ·  Flask  ·  Docker</text>
-  <text class="svc-sub" x="340" y="834">Region: ap-south-1 (Mumbai)  ·  Account: 544949538590  ·  Zero-downtime Blue/Green deployments</text>
+  <text class="svc-sub" x="340" y="834">Region: ap-south-1 (Mumbai) ·  Zero-downtime Blue/Green deployments</text>
 
   <text class="flow-label" x="340" y="856" text-anchor="middle">github.com/ManojKumar-Devops/bluegreen-pipeline</text>
 
